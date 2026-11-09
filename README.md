@@ -1,4 +1,4 @@
-# 🔔 deskbell
+# Deskbell 🔔
 
 A tiny always-on-top **desk bell** for your desktop that AI agents ring (through
 [MCP](https://modelcontextprotocol.io)) when they want to use **your mouse and keyboard**, e.g.
