@@ -1,0 +1,38 @@
+[package]
+name = "deskbell"
+version = "1.0.0"
+edition = "2024"
+# The dependencies' minimum (egui 0.37). CI checks it; keep ci.yml's msrv job in sync.
+rust-version = "1.95"
+description = "A desk bell widget + MCP server that lets AI agents politely ask for control of your mouse and keyboard"
+license = "MIT"
+repository = "https://github.com/H3katonkheir/deskbell"
+
+[dependencies]
+directories = "6.0.0"
+eframe = { version = "0.37.0", default-features = false, features = ["clipboard", "default_fonts", "glow", "wayland", "x11"] }
+ed25519-dalek = "3"
+enigo = "0.6.1"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+sha2 = "0.11"
+tiny_http = "0.12.0"
+ureq = { version = "3.5.1", default-features = false, features = ["rustls"] }
+
+[dev-dependencies]
+# Only for examples/release_signing.rs (key generation).
+getrandom = "0.4"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+strip = true
+
+# Used only to force the X11 backend (global cursor tracking doesn't work on native Wayland).
+[target.'cfg(target_os = "linux")'.dependencies]
+winit = { version = "0.30.13", default-features = false, features = ["x11"] }
+
+# Low-level mouse hook: tells hardware input apart from software-injected input.
+[target.'cfg(windows)'.dependencies]
+raw-window-handle = "0.6.2"
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging", "Win32_System_Console", "Win32_System_LibraryLoader", "Win32_System_Registry", "Win32_System_Threading"] }

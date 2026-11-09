@@ -1,0 +1,24 @@
+{
+  "name": "deskbell",
+  "displayName": "Deskbell",
+  "version": "1.0.0",
+  "description": "A desk bell agents ring to ask for your physical mouse and keyboard: MCP server registration plus a skill with the etiquette (request, renew, release, back off when the user takes control back).",
+  "author": { "name": "H3katonkheir" },
+  "repository": "https://github.com/H3katonkheir/deskbell",
+  "license": "MIT",
+  "keywords": ["mouse", "keyboard", "computer-use", "desktop", "mcp", "gui-automation"],
+  "userConfig": {
+    "binary_path": {
+      "type": "file",
+      "title": "deskbell binary",
+      "description": "Full path to the deskbell executable (download it from the GitHub releases or build it with cargo build --release).",
+      "required": true
+    }
+  },
+  "mcpServers": {
+    "deskbell": {
+      "command": "${user_config.binary_path}",
+      "args": ["mcp"]
+    }
+  }
+}

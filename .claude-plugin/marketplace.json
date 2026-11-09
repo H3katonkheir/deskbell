@@ -1,0 +1,12 @@
+{
+  "name": "deskbell",
+  "description": "Deskbell: lets AI agents politely ask for control of your mouse and keyboard.",
+  "owner": { "name": "H3katonkheir" },
+  "plugins": [
+    {
+      "name": "deskbell",
+      "source": "./",
+      "description": "MCP server registration and agent etiquette skill for the deskbell widget."
+    }
+  ]
+}

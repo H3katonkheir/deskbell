@@ -1,0 +1,6 @@
+/target
+*.log
+.serena/
+dist/
+# Local knowledge graph (generate it with graphify)
+graphify-out/
