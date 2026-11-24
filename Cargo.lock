@@ -493,7 +493,7 @@ dependencies = [
 
 [[package]]
 name = "deskbell"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "directories",
  "ed25519-dalek",
@@ -508,6 +508,7 @@ dependencies = [
  "ureq",
  "windows-sys 0.61.2",
  "winit",
+ "x11rb",
 ]
 
 [[package]]

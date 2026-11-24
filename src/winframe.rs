@@ -13,14 +13,18 @@
 //!   `WS_EX_TRANSPARENT` (which controls click-through) changes. Note: setting
 //!   `WS_EX_LAYERED` ourselves before the first frame leaves the window
 //!   invisible, so we only preserve it.
+//! * The saved position is in physical pixels: logical points depend on the
+//!   scale of the monitor, and winit converts them with the primary monitor's
+//!   scale, which put the bell off screen on mixed-DPI setups.
 
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use std::sync::atomic::{AtomicIsize, Ordering};
-use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
+use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
+use windows_sys::Win32::Graphics::Gdi::{MONITOR_DEFAULTTONULL, MonitorFromPoint};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    CallWindowProcW, GWL_EXSTYLE, GWLP_WNDPROC, STYLESTRUCT, SWP_FRAMECHANGED, SWP_NOACTIVATE,
-    SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SetWindowPos, WM_NCCALCSIZE, WM_STYLECHANGING, WNDPROC,
-    WS_EX_LAYERED,
+    CallWindowProcW, GWL_EXSTYLE, GWLP_WNDPROC, GetWindowRect, STYLESTRUCT, SWP_FRAMECHANGED,
+    SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SetWindowPos, WM_NCCALCSIZE,
+    WM_STYLECHANGING, WNDPROC, WS_EX_LAYERED,
 };
 
 #[cfg(target_pointer_width = "64")]
@@ -31,18 +35,22 @@ use windows_sys::Win32::UI::WindowsAndMessaging::SetWindowLongW as set_long;
 /// The window procedure we replaced (winit's).
 static ORIGINAL_PROC: AtomicIsize = AtomicIsize::new(0);
 
-pub fn apply(cc: &eframe::CreationContext<'_>) {
+/// Installs the fixes and moves the window to `pos` (physical pixels). Returns
+/// whether it was placed; not if there's no `pos` or the point at `anchor`
+/// (fraction of the window size, i.e. the bell) would be on no monitor.
+pub fn apply(cc: &eframe::CreationContext<'_>, pos: Option<[f32; 2]>, anchor: [f32; 2]) -> bool {
     let Ok(handle) = cc.window_handle() else {
-        return;
+        return false;
     };
     let RawWindowHandle::Win32(h) = handle.as_raw() else {
-        return;
+        return false;
     };
     let hwnd = h.hwnd.get() as HWND;
+    let placed = pos.is_some_and(|[x, y]| unsafe { place(hwnd, x as i32, y as i32, anchor) });
     unsafe {
         let prev = set_long(hwnd, GWLP_WNDPROC, wnd_proc as *const () as _);
         if prev == 0 {
-            return;
+            return placed;
         }
         ORIGINAL_PROC.store(prev as isize, Ordering::SeqCst);
         // Re-run WM_NCCALCSIZE through our handler.
@@ -56,6 +64,23 @@ pub fn apply(cc: &eframe::CreationContext<'_>) {
             SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
         );
     }
+    placed
+}
+
+unsafe fn place(hwnd: HWND, x: i32, y: i32, anchor: [f32; 2]) -> bool {
+    let mut r: RECT = unsafe { std::mem::zeroed() };
+    if unsafe { GetWindowRect(hwnd, &mut r) } == 0 {
+        return false;
+    }
+    let pt = POINT {
+        x: x + ((r.right - r.left) as f32 * anchor[0]) as i32,
+        y: y + ((r.bottom - r.top) as f32 * anchor[1]) as i32,
+    };
+    if unsafe { MonitorFromPoint(pt, MONITOR_DEFAULTTONULL) }.is_null() {
+        return false;
+    }
+    let flags = SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE;
+    unsafe { SetWindowPos(hwnd, std::ptr::null_mut(), x, y, 0, 0, flags) != 0 }
 }
 
 unsafe extern "system" fn wnd_proc(

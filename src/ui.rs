@@ -37,6 +37,7 @@ const POS_SAVE_DELAY: Duration = Duration::from_secs(1);
 
 pub fn run(shared: Arc<Shared>, open_settings: bool) -> eframe::Result {
     let pos = shared.config.lock().unwrap().window_pos;
+    #[allow(unused_mut)]
     let mut viewport = egui::ViewportBuilder::default()
         .with_title("Deskbell")
         .with_app_id("deskbell")
@@ -47,6 +48,11 @@ pub fn run(shared: Arc<Shared>, open_settings: bool) -> eframe::Result {
         .with_has_shadow(false)
         .with_always_on_top()
         .with_taskbar(false);
+    // Windows and Linux restore the position after the window exists, in
+    // physical pixels: winit would convert logical points with the scale of the
+    // wrong monitor (see winframe and `BellApp::restore`). macOS works in
+    // points everywhere.
+    #[cfg(target_os = "macos")]
     if let Some(p) = pos {
         viewport = viewport.with_position(p);
     }
@@ -72,13 +78,19 @@ pub fn run(shared: Arc<Shared>, open_settings: bool) -> eframe::Result {
             shared.set_egui_ctx(cc.egui_ctx.clone());
             setup_style(&cc.egui_ctx, shared.config.lock().unwrap().theme);
             #[cfg(windows)]
-            crate::winframe::apply(cc);
+            let positioned = crate::winframe::apply(cc, pos, (BELL_C.to_vec2() / WIN).into());
+            #[cfg(not(windows))]
+            let positioned = pos.is_some();
             // Started after the window exists so DPI awareness is already set (Windows).
             crate::input::spawn_monitor(shared.clone());
             let auto_update = shared.config.lock().unwrap().auto_update;
             let updates = crate::update::start(cc.egui_ctx.clone(), auto_update);
-            let mut app = BellApp::new(shared, pos.is_some(), updates);
+            let mut app = BellApp::new(shared, positioned, updates);
             app.show_settings = open_settings;
+            #[cfg(not(windows))]
+            {
+                app.restore = pos.map(Pos2::from);
+            }
             Ok(Box::new(app))
         }),
     )
@@ -87,6 +99,10 @@ pub fn run(shared: Arc<Shared>, open_settings: bool) -> eframe::Result {
 struct BellApp {
     shared: Arc<Shared>,
     positioned: bool,
+    /// Saved position still to be checked (and on Linux applied) once the
+    /// window is shown.
+    #[cfg(not(windows))]
+    restore: Option<Pos2>,
     passthrough: Option<bool>,
     menu_until: Option<Instant>,
     show_settings: bool,
@@ -119,6 +135,8 @@ impl BellApp {
         Self {
             shared,
             positioned,
+            #[cfg(not(windows))]
+            restore: None,
             passthrough: None,
             menu_until: None,
             show_settings: false,
@@ -153,6 +171,58 @@ impl BellApp {
         drop(cfg);
         self.shared.with(|b, now| b.update_settings(settings, now));
     }
+}
+
+/// macOS: the saved position was applied at creation; returns false (and moves
+/// the window onto the main screen, for the default placement) if it's on no
+/// screen, e.g. an unplugged monitor.
+#[cfg(target_os = "macos")]
+fn restore_position(ctx: &egui::Context, vp: &egui::ViewportInfo, _: Pos2) -> bool {
+    // A window on no screen has no monitor (`NSWindow.screen` is nil).
+    if vp.monitor_size.is_some() {
+        return true;
+    }
+    ctx.send_viewport_cmd(ViewportCommand::OuterPosition(Pos2::ZERO));
+    false
+}
+
+/// Linux: moves the window to `p` (physical pixels), unless the bell would be
+/// on no monitor.
+#[cfg(not(any(windows, target_os = "macos")))]
+fn restore_position(ctx: &egui::Context, vp: &egui::ViewportInfo, p: Pos2) -> bool {
+    let ppp = vp.native_pixels_per_point.unwrap_or(1.0);
+    if !on_a_monitor(p + BELL_C.to_vec2() * ppp) {
+        return false;
+    }
+    // winit converts back with this same scale, so this lands exactly on `p`.
+    ctx.send_viewport_cmd(ViewportCommand::OuterPosition(p / ppp));
+    true
+}
+
+/// Whether `p` (X11 root coordinates, physical pixels) is on a monitor.
+#[cfg(not(any(windows, target_os = "macos")))]
+fn on_a_monitor(p: Pos2) -> bool {
+    use x11rb::connection::Connection;
+    use x11rb::protocol::randr::ConnectionExt;
+    // Can't tell (e.g. native Wayland, where windows can't be placed anyway): trust it.
+    let Ok((conn, screen)) = x11rb::rust_connection::RustConnection::connect(None) else {
+        return true;
+    };
+    let root = conn.setup().roots[screen].root;
+    let Some(reply) = conn
+        .randr_get_monitors(root, true)
+        .ok()
+        .and_then(|c| c.reply().ok())
+    else {
+        return true;
+    };
+    reply.monitors.iter().any(|m| {
+        Rect::from_min_size(
+            pos2(m.x.into(), m.y.into()),
+            vec2(m.width.into(), m.height.into()),
+        )
+        .contains(p)
+    })
 }
 
 fn bell_rect() -> Rect {
@@ -228,6 +298,18 @@ impl eframe::App for BellApp {
 
         // ---- placement & persistence -------------------------------------------------
         let vp = ctx.input(|i| i.viewport().clone());
+        // Waits for the window to be shown: until then macOS reports no
+        // monitor even on screen, and X11 window managers may still move it.
+        #[cfg(not(windows))]
+        if self.restore.is_some() {
+            if ctx.cumulative_frame_nr() < 2 {
+                ctx.request_repaint();
+            } else if let Some(p) = self.restore.take()
+                && !restore_position(&ctx, &vp, p)
+            {
+                self.positioned = false;
+            }
+        }
         if !self.positioned
             && let Some(m) = vp.monitor_size
         {
@@ -238,10 +320,17 @@ impl eframe::App for BellApp {
             self.positioned = true;
         }
         if let Some(outer) = vp.outer_rect {
-            if self.last_pos.is_some_and(|p| p != outer.min) {
+            // Saved in physical pixels, except on macOS where points don't
+            // depend on the monitor.
+            let p = if cfg!(not(target_os = "macos")) {
+                outer.min * vp.native_pixels_per_point.unwrap_or(1.0)
+            } else {
+                outer.min
+            };
+            if self.last_pos.is_some_and(|l| l != p) {
                 self.pos_dirty_since = Some(now);
             }
-            self.last_pos = Some(outer.min);
+            self.last_pos = Some(p);
         }
         if self
             .pos_dirty_since

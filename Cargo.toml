@@ -1,6 +1,6 @@
 [package]
 name = "deskbell"
-version = "1.0.0"
+version = "1.0.1"
 edition = "2024"
 # The dependencies' minimum (egui 0.37). CI checks it; keep ci.yml's msrv job in sync.
 rust-version = "1.95"
@@ -31,6 +31,10 @@ strip = true
 # Used only to force the X11 backend (global cursor tracking doesn't work on native Wayland).
 [target.'cfg(target_os = "linux")'.dependencies]
 winit = { version = "0.30.13", default-features = false, features = ["x11"] }
+
+# Monitor list for restoring the window position; already pulled in by enigo.
+[target.'cfg(all(unix, not(target_os = "macos")))'.dependencies]
+x11rb = { version = "0.13.2", features = ["randr"] }
 
 # Low-level mouse hook: tells hardware input apart from software-injected input.
 [target.'cfg(windows)'.dependencies]

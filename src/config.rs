@@ -61,7 +61,7 @@ pub struct Config {
     pub simplify_after_secs: u64,
     /// Look for a new version once a day (installing is always a click).
     pub auto_update: bool,
-    /// Last window position (logical points), restored on start.
+    /// Last window position (physical pixels; points on macOS), restored on start.
     pub window_pos: Option<[f32; 2]>,
 }
 

@@ -1,7 +1,7 @@
 {
   "name": "deskbell",
   "displayName": "Deskbell",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "A desk bell agents ring to ask for your physical mouse and keyboard: MCP server registration plus a skill with the etiquette (request, renew, release, back off when the user takes control back).",
   "author": { "name": "H3katonkheir" },
   "repository": "https://github.com/H3katonkheir/deskbell",
